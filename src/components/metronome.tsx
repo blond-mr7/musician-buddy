@@ -1,203 +1,354 @@
-import React, { useEffect, useRef, useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { playPersonalizedSound, playSoundByType } from "./constants";
+import TimeSignature from "./time-signature";
+import TapTempo from "./tap-tempo";
+import { Button } from "@/components/ui/button";
+import { Slider } from "./ui/slider";
+import { Input } from "./ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
+import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 
-const sounds: { [key: string]: HTMLAudioElement } = {
-  classical: new Audio("public/classical.mp3"),
-  metronome: new Audio("public/metronome.wav"),
-  drumstick: new Audio("public/drumstick.mp3"),
-  camera: new Audio("public/camera.wav"),
-  interface: new Audio("public/interface.wav"),
-  modern: new Audio("public/modern.wav"),
-  pro: new Audio("public/pro.mp3"),
-  typewriter: new Audio("public/typewriter.wav"),
-  handgun: new Audio("public/handgun.mp3"),
-};
+interface MetronomeProps {
+  setBpm: (bpm: number) => void;
+  isPlayingFromProgressive: boolean;
+  setIsPlayingFromProgressive: (playing: boolean) => void;
+  onNoteValueChange?: boolean;
+}
 
-const Metronome = () => {
-  const [bpm, setBpm] = useState(60);
-  const tapTimes = useRef<number[]>([]);
+const Metronome: React.FC<MetronomeProps> = ({
+  setBpm,
+  isPlayingFromProgressive,
+  setIsPlayingFromProgressive,
+  onNoteValueChange,
+}) => {
+  const [mode, setMode] = useState<"standard" | "progressive">("standard");
+  const [initialBpm, setInitialBpm] = useState(60);
+  const [targetBpm, setTargetBpm] = useState(120);
+  const [progressionPercentage, setProgressionPercentage] = useState(0);
+  const [progressionBpm, setProgressionBpm] = useState(0);
+  const [currentBpm, setCurrentBpm] = useState(initialBpm);
   const [timeSignature, setTimeSignature] = useState("4");
-  const [beatSound, setBeatSound] = useState("classical");
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentBeat, setCurrentBeat] = useState(0);
+  const [selectedSound, setSelectedSound] = useState("click");
+  const [numberOfRepeats, setNumberOfRepeats] = useState(2);
+  const [compassCount, setCompassCount] = useState(0);
   const intervalRef = useRef<number | null>(null);
-  const currentAudio = useRef<HTMLAudioElement | null>(null);
-
-  const playBeatSound = () => {
-    if (currentAudio.current) {
-      currentAudio.current.pause();
-      currentAudio.current.currentTime = 0;
-    }
-
-    const selectedSound = sounds[beatSound];
-    currentAudio.current = selectedSound;
-
-    // Destacar o primeiro beat
-    if (currentBeat === 0) {
-      selectedSound.volume = 1.0; // Primeiro beat mais alto
-    } else {
-      selectedSound.volume = 0.75; // Outros beats mais baixos
-    }
-
-    selectedSound.currentTime = 0;
-    selectedSound.play();
-
-    setCurrentBeat((prevBeat) => (prevBeat + 1) % parseInt(timeSignature));
-  };
-
-  const playSingleBeatFor10Seconds = () => {
-    const selectedSound = sounds[beatSound];
-
-    if (currentAudio.current) {
-      currentAudio.current.pause();
-      currentAudio.current.currentTime = 0;
-    }
-
-    currentAudio.current = selectedSound;
-    selectedSound.currentTime = 0;
-    selectedSound.play();
-
-    setTimeout(() => {
-      if (currentAudio.current) {
-        currentAudio.current.pause();
-        currentAudio.current.currentTime = 0;
-      }
-    }, 10000);
-  };
+  const beatCount = parseInt(timeSignature, 10);
+  const [currentBeat, setCurrentBeat] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progressionType, setProgressionType] = useState<
+    "percentage" | "bpm"
+  >();
 
   const calculateInterval = (bpm: number) => (60 / bpm) * 1000;
 
+  const toggleMode = () => {
+    setMode((prevMode) =>
+      prevMode === "standard" ? "progressive" : "standard"
+    );
+    setIsPlayingFromProgressive(false);
+    setIsPlaying(false);
+    setCurrentBpm(initialBpm);
+  };
+
+  const increaseBpmGradually = useCallback(() => {
+    if (progressionPercentage !== 0) {
+      const bpmIncrementByPercentage =
+        initialBpm * (progressionPercentage / 100);
+      setCurrentBpm((prevBpm) => {
+        const newBpm = prevBpm + bpmIncrementByPercentage;
+        setBpm(newBpm);
+        return newBpm >= targetBpm ? targetBpm : newBpm;
+      });
+    }
+    if (progressionBpm !== 0) {
+      setCurrentBpm((prevBpm) => {
+        const newBpm = prevBpm + progressionBpm;
+        setBpm(newBpm);
+        return newBpm >= targetBpm ? targetBpm : newBpm;
+      });
+    }
+  }, [initialBpm, progressionPercentage, targetBpm, progressionBpm, setBpm]);
+
+  const handleBeatCycle = useCallback(() => {
+    setCompassCount((prevCount) => {
+      if (prevCount + 1 >= numberOfRepeats) {
+        increaseBpmGradually();
+        return 0;
+      }
+      return prevCount + 1;
+    });
+  }, [numberOfRepeats, increaseBpmGradually]);
+
+  useEffect(() => {
+    const personalizedSounds = [
+      "camera",
+      "classical",
+      "drumstick",
+      "handgun",
+      "interface",
+      "metronome",
+      "modern",
+      "pro",
+      "typewriter",
+    ];
+
+    const isPlayingMode =
+      mode === "standard" ? isPlaying : isPlayingFromProgressive;
+
+    if (isPlayingMode) {
+      const interval = calculateInterval(currentBpm);
+
+      intervalRef.current = window.setInterval(() => {
+        setCurrentBeat((prevBeat) => {
+          const nextBeat = (prevBeat + 1) % beatCount;
+
+          if (personalizedSounds.includes(selectedSound)) {
+            playPersonalizedSound(selectedSound, currentBpm, nextBeat === 0);
+          } else {
+            playSoundByType(selectedSound, nextBeat === 0);
+          }
+
+          if (nextBeat === 0 && mode === "progressive") {
+            handleBeatCycle();
+          }
+
+          return nextBeat;
+        });
+      }, interval);
+
+      return () => {
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+        }
+      };
+    }
+  }, [
+    isPlaying,
+    isPlayingFromProgressive,
+    currentBpm,
+    selectedSound,
+    beatCount,
+    handleBeatCycle,
+    mode,
+  ]);
+
   const startMetronome = () => {
-    if (isPlaying) return;
-
     setIsPlaying(true);
-    const interval = calculateInterval(bpm);
-
-    intervalRef.current = window.setInterval(playBeatSound, interval);
+    setIsPlayingFromProgressive(true);
   };
 
   const stopMetronome = () => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-    if (currentAudio.current) {
-      currentAudio.current.pause(); // Pausar imediatamente o som
-      currentAudio.current.currentTime = 0; // Resetar o tempo
     }
     setIsPlaying(false);
+    setIsPlayingFromProgressive(false);
+    setCurrentBpm(initialBpm);
     setCurrentBeat(0);
+    setCompassCount(0);
   };
 
   const handleBpmChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const newBpm = Number(event.target.value);
+    setCurrentBpm(newBpm);
+    restartMetronome(newBpm);
+  };
+  const restartMetronome = (newBpm: number) => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+    if (onNoteValueChange) {
+      stopMetronome();
+      startMetronome();
+    }
+    setCurrentBpm(newBpm);
     setBpm(newBpm);
-
-    if (isPlaying) {
-      clearInterval(intervalRef.current || undefined);
-      const newInterval = calculateInterval(newBpm);
-      intervalRef.current = window.setInterval(playBeatSound, newInterval);
-    }
-  };
-
-  const handleBeatSoundChange = (
-    event: React.ChangeEvent<HTMLSelectElement>
-  ) => {
-    setBeatSound(event.target.value);
-
-    // Se o metrônomo estiver tocando, atualiza o som imediatamente
-    if (isPlaying) {
-      playBeatSound();
-    }
-  };
-
-  const calculateBpmFromTaps = () => {
-    if (tapTimes.current.length > 1) {
-      const lastTap = tapTimes.current[tapTimes.current.length - 1];
-      const secondLastTap = tapTimes.current[tapTimes.current.length - 2];
-
-      const interval = lastTap - secondLastTap;
-
-      const newBpm = Math.round(60000 / interval);
-      if (newBpm > 40 && newBpm < 240) setBpm(newBpm);
-
-      if (isPlaying) {
-        clearInterval(intervalRef.current || undefined);
-        const newInterval = calculateInterval(newBpm);
-        intervalRef.current = window.setInterval(playBeatSound, newInterval);
-      }
-    }
-  };
-
-  const handleTapTempo = () => {
-    const currentTime = Date.now();
-
-    if (
-      tapTimes.current.length > 1 &&
-      currentTime - tapTimes.current[tapTimes.current.length - 1] < 300
-    ) {
-      return;
-    }
-
-    tapTimes.current.push(currentTime);
-
-    if (tapTimes.current.length > 2) {
-      tapTimes.current = tapTimes.current.slice(-2);
-    }
-
-    calculateBpmFromTaps();
-  };
-
-  const handleTimeSignatureChange = (
-    event: React.ChangeEvent<HTMLSelectElement>
-  ) => {
-    setTimeSignature(event.target.value);
+    startMetronome();
   };
 
   return (
     <div>
-      <h2>Current BPM: {bpm}</h2>
-      <input
-        type="range"
-        min="30"
-        max="240"
-        value={bpm}
-        onChange={handleBpmChange}
+      <h2>
+        {mode === "standard" ? "Standard Metronome" : "Progressive Metronome"}
+      </h2>
+
+      <Button onClick={toggleMode}>
+        {mode === "standard" ? "Switch to Progressive" : "Switch to Standard"}
+      </Button>
+
+      {mode === "progressive" && (
+        <>
+          <div className="w-1/2 lg:w-1/4">
+            <label>
+              Initial BPM:
+              <Input
+                type="number"
+                value={initialBpm}
+                onChange={(e) => setInitialBpm(Number(e.target.value))}
+                min={30}
+                max={targetBpm - 1}
+              />
+            </label>
+          </div>
+          <div className="w-1/2 lg:w-1/4">
+            <label>
+              Target BPM:
+              <Input
+                type="number"
+                value={targetBpm}
+                onChange={(e) => setTargetBpm(Number(e.target.value))}
+                min={initialBpm + 1}
+                max={240}
+              />
+            </label>
+          </div>
+
+          <>
+            <div className="mb-4">
+              <h3>Select Progression Type</h3>
+              <RadioGroup
+                value={progressionType}
+                onValueChange={(value: "percentage" | "bpm") =>
+                  setProgressionType(value)
+                }
+              >
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="percentage" id="percentage" />
+                  <label htmlFor="percentage">Progression by Percentage</label>
+
+                  <RadioGroupItem value="bpm" id="bpm" />
+                  <label htmlFor="bpm">Progression by BPM</label>
+                </div>
+              </RadioGroup>
+            </div>
+
+            {progressionType === "percentage" && (
+              <div className="w-1/2 lg:w-1/4">
+                <label>
+                  Progression Percentage:
+                  <Input
+                    placeholder="%"
+                    type="number"
+                    value={progressionPercentage}
+                    onChange={(e) =>
+                      setProgressionPercentage(Number(e.target.value))
+                    }
+                    max={100}
+                  />
+                </label>
+              </div>
+            )}
+
+            {progressionType === "bpm" && (
+              <div className="w-1/2 lg:w-1/4">
+                <label>
+                  Progression BPM:
+                  <Input
+                    placeholder="BPM"
+                    type="number"
+                    value={progressionBpm}
+                    onChange={(e) => setProgressionBpm(Number(e.target.value))}
+                    min={1}
+                  />
+                </label>
+              </div>
+            )}
+          </>
+
+          <div className="w-1/2 lg:w-1/4">
+            <label>
+              Number of Repetitions (for compass):
+              <Input
+                type="number"
+                value={numberOfRepeats}
+                onChange={(e) => setNumberOfRepeats(Number(e.target.value))}
+                min={1}
+              />
+            </label>
+          </div>
+          <h2>
+            Current BPM: {currentBpm} (
+            {Math.round(
+              ((currentBpm - initialBpm) / (targetBpm - initialBpm)) * 100
+            )}
+            % de 100%)
+          </h2>
+        </>
+      )}
+      {mode === "standard" && (
+        <>
+          <h2>Current BPM: {currentBpm}</h2>
+          <div className="w-full lg:w-1/2">
+            <Slider
+              value={[currentBpm]}
+              min={30}
+              max={240}
+              step={1}
+              onChange={handleBpmChange}
+              onValueChange={(value) => {
+                restartMetronome(value[0]);
+              }}
+            />
+          </div>
+          <div>
+            <Button onClick={() => restartMetronome(currentBpm - 1)}>-</Button>
+            <Button onClick={() => restartMetronome(currentBpm + 1)}>+</Button>
+          </div>
+
+          <TapTempo
+            setBpm={(newBpm) => {
+              restartMetronome(newBpm);
+            }}
+          />
+        </>
+      )}
+
+      <TimeSignature
+        timeSignature={timeSignature}
+        setTimeSignature={setTimeSignature}
       />
-      <br />
-      <button onClick={handleTapTempo}>Tap Tempo</button>
+
       <div>
-        <h3>Select Time Signature</h3>
-        <select value={timeSignature} onChange={handleTimeSignatureChange}>
-          <option value="2">2/4</option>
-          <option value="3">3/4</option>
-          <option value="4">4/4</option>
-        </select>
+        <h2>Choose a Sound</h2>
+        <div className="w-1/2 lg:w-1/4">
+          <Select
+            value={selectedSound}
+            onValueChange={(value) => setSelectedSound(value)}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Choose a sound" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="camera">Camera</SelectItem>
+              <SelectItem value="classical">Classical</SelectItem>
+              <SelectItem value="handgun">Handgun</SelectItem>
+              <SelectItem value="interface">Interface</SelectItem>
+              <SelectItem value="metronome">Metronome</SelectItem>
+              <SelectItem value="modern">Modern</SelectItem>
+              <SelectItem value="pro">Pro</SelectItem>
+              <SelectItem value="typewriter">Typewriter</SelectItem>
+              <SelectItem value="click">Click</SelectItem>
+              <SelectItem value="beep">Beep</SelectItem>
+              <SelectItem value="tick">Tick</SelectItem>
+              <SelectItem value="snap">Snap</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      <p>Selected Time Signature: {timeSignature}/4</p>
-
-      <h3>Select Beat Sound</h3>
-      <select value={beatSound} onChange={handleBeatSoundChange}>
-        <option value="classical">Classical</option>
-        <option value="metronome">Metronome</option>
-        <option value="drumstick">Drumstick</option>
-        <option value="handgun">Handgun</option>
-        <option value="camera">Camera</option>
-        <option value="interface">Interface</option>
-        <option value="modern">Modern</option>
-        <option value="pro">Pro</option>
-        <option value="typewriter">Typewriter</option>
-      </select>
-
-      <p>Selected Beat Sound: {beatSound}</p>
-
-      <button onClick={playSingleBeatFor10Seconds}>
-        Play Beat for 10 Seconds
-      </button>
-
-      <button onClick={isPlaying ? stopMetronome : startMetronome}>
-        {isPlaying ? "Stop" : "Start"}
-      </button>
+      <Button
+        onClick={
+          isPlaying || isPlayingFromProgressive ? stopMetronome : startMetronome
+        }
+      >
+        {isPlaying || isPlayingFromProgressive ? "Stop" : "Start"}
+      </Button>
     </div>
   );
 };

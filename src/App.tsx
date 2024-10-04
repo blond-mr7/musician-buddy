@@ -1,5 +1,4 @@
-import React from "react";
-import Metronome from "./components/metronome";
+import MainPage from "./pages/main-page";
 
 function App() {
   return (
@@ -8,8 +7,7 @@ function App() {
       <header>
         <h1>Metronome App</h1>
       </header>
-      <main>Metronome</main>
-      <Metronome />
+      <MainPage />
     </>
   );
 }
